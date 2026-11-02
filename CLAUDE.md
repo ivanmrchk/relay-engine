@@ -43,9 +43,12 @@ relay_engine/
                          jitter; respects a source's own Retry-After header
                          when present. A function, not a decorator, so sleep
                          and randomness are passed in per call
+    session.py          ResilientSession: the one place HTTP calls happen,
+                         to sources and to bi-engine; every request waits
+                         at the rate limit and is retried
     idempotency.py       idempotency-key helpers for the create-demo's writes
-  clients/
-    _base.py            shared HTTP/session plumbing every client inherits
+  clients/                plain functions taking a ResilientSession; no
+                           client holds state of its own
     housecall_pro.py    jobs, invoices, estimates (three feeds, one client)
     website_leads.py     Surge Quick Quote Leads WP plugin (see contract below)
     search_console.py   totals + query-page feeds (two feeds, one client)
@@ -167,8 +170,9 @@ From the actual `surge-quick-quote-leads` WordPress plugin:
 
 ## Rules
 
-- Every client goes through `core/rate_limit.py` and `core/retry.py`; no
-  client makes a raw HTTP call of its own outside `_base.py`.
+- Every HTTP call, to a source or to `bi-engine`, goes through
+  `core/session.py`'s `ResilientSession`, and so through the rate limit and
+  retries; nothing calls `httpx` directly.
 - Idempotency keys (for the `create-demo` write path, and for every POST
   to `bi-engine`) are deterministic from the input, never random.
 - Backoff is exponential with jitter, and respects a source's own

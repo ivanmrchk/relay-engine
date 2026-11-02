@@ -16,6 +16,18 @@ class FakeClock:
         self.now += seconds
 
 
+class TopOfRange:
+    """A random source that always picks the jitter ceiling, so backoff delays are exact."""
+
+    def uniform(self, low: float, high: float) -> float:
+        return high
+
+
 @pytest.fixture
 def clock() -> FakeClock:
     return FakeClock()
+
+
+@pytest.fixture
+def jitter_at_ceiling() -> TopOfRange:
+    return TopOfRange()
