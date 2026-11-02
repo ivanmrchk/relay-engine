@@ -53,13 +53,13 @@ relay_engine/
     website_leads.py     Surge Quick Quote Leads WP plugin (see contract below)
     search_console.py   totals + query-page feeds (two feeds, one client)
   writers/
-    bi_engine.py          POSTs a fetched page to bi-engine's
-                           POST /ingest/{feed_name}; one function, reused by
-                           every client
+    bi_engine.py          deliver_pull(): uploads each page to
+                           POST /ingest/{feed_name} as it's fetched, then
+                           one rebuild; reused by every client
   creator/                demo: AI drafts a record, then creates it via API
                            -- the "write" side, showing idempotent POSTs
-  feeds.py                the six feed names (data only); each is also
-                           bi-engine's POST /ingest/{feed_name} path
+  feeds.py                the six feed names and FetchedPage (data only);
+                           each name is also bi-engine's upload path
   cli.py                  python -m relay_engine pull <feed> / create-demo
 n8n/
   relay-workflow.json      scheduled pulls, one branch per source, each
@@ -100,8 +100,10 @@ new — all the ingestion smarts live there, not here.
   own key is unset.
 - **One rebuild per pull, not per page.** A clean-layer rebuild takes
   about 20 s, so upload each page with `?rebuild=false`, then call
-  `POST /ingest/rebuild` once at the end — only if at least one upload
-  came back `was_new: true`.
+  `POST /ingest/rebuild` once at the end — after every pull that uploaded
+  anything, even if no upload came back `was_new: true`. A page stored
+  before its response was lost comes back `was_new: false` on the retry,
+  yet no rebuild has included it.
 - **relay-engine never parses or interprets what it fetches.** It fetches
   a page, and POSTs it to `bi-engine` byte-for-byte. The only choices it
   makes are the feed name and the file name:
