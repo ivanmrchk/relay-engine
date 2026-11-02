@@ -52,6 +52,8 @@ relay_engine/
                            every client
   creator/                demo: AI drafts a record, then creates it via API
                            -- the "write" side, showing idempotent POSTs
+  feeds.py                the six feed names (data only); each is also
+                           bi-engine's POST /ingest/{feed_name} path
   cli.py                  python -m relay_engine pull <feed> / create-demo
 n8n/
   relay-workflow.json      scheduled pulls, one branch per source, each
@@ -63,7 +65,9 @@ docs/
 ## Commands
 
 ```bash
+py -3.14 -m venv .venv               # Python >= 3.12; bi-engine deploys on 3.12
 pip install -e ".[dev]"
+cp .env.example .env                 # then fill in the credentials
 
 python -m relay_engine pull housecall_pro_jobs
 python -m relay_engine pull housecall_pro_invoices

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relay-engine"
+version = "0.1.0"
+description = "Resilient, rate-limited relay from source APIs to bi-engine's ingestion API"
+requires-python = ">=3.12"  # bi-engine deploys on 3.12
+dependencies = [
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["relay_engine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
