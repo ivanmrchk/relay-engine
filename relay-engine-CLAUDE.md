@@ -84,9 +84,22 @@ one per feed, taking the fetched page as a file upload. It stores the raw
 bytes, deduped by content hash, and rebuilds the clean layer if the file is
 new — all the ingestion smarts live there, not here.
 
+- **Auth:** every upload sends `X-Relay-Ingest-Key: <key>`, from the
+  `RELAY_INGEST_KEY` env var (the same value is set on `bi-engine`).
+  `bi-engine` answers 401 for a missing or wrong key, and 503 while its
+  own key is unset.
+- **One rebuild per pull, not per page.** A clean-layer rebuild takes
+  about 20 s, so upload each page with `?rebuild=false`, then call
+  `POST /ingest/rebuild` once at the end — only if at least one upload
+  came back `was_new: true`.
 - **relay-engine never parses or interprets what it fetches.** It fetches
-  a page, and POSTs it to `bi-engine` byte-for-byte. The only
-  transformation allowed is picking the right feed name.
+  a page, and POSTs it to `bi-engine` byte-for-byte. The only choices it
+  makes are the feed name and the file name:
+  - Housecall Pro and website_leads: `page_NNN.json` (`page_001.json`, …).
+  - Search Console: **one request per day per feed, named `YYYY-MM-DD.json`**
+    after that day. This one is load-bearing: the query/page response
+    doesn't repeat the date in its rows, so `bi-engine` reads the day from
+    the first 10 characters of the file name.
 - **Six feeds, three clients** (confirmed — Grasshopper and owner_notes are
   explicitly out of scope; Grasshopper is owner-uploaded by hand, owner
   notes are hand-written markdown, neither comes from an API relay-engine
@@ -99,9 +112,11 @@ new — all the ingestion smarts live there, not here.
   timestamp, no request id baked into what gets POSTed — a harmless retry
   must produce byte-identical content, or `bi-engine`'s content-hash dedup
   thinks it's a new file and double-counts the same data.
-- **Idempotency key per request**, not per file: tag each POST so a retried
-  upload of the exact same page is safe to repeat even if the first attempt
-  actually succeeded but the response was lost.
+- **What actually makes a retried upload safe is the content hash**, not
+  a header: if the first attempt succeeded but its response was lost, the
+  retry sends the same bytes and comes back `was_new: false`. Each POST
+  still carries a deterministic `Idempotency-Key`, but `bi-engine` doesn't
+  read it today, so never rely on it in place of byte-identical content.
 
 ## Source: website_leads (confirmed, real contract)
 
@@ -140,6 +155,8 @@ From the actual `surge-quick-quote-leads` WordPress plugin:
   service-account credentials via `searchanalytics.query`, not an API key.
   Confirm the exact auth flow and the two feeds' dimension configs
   (`by_date` vs. `by_query_page`) before writing `clients/search_console.py`.
+  Whatever the dimensions, query one day at a time: the file name carries
+  the day (see the contract above).
 
 ## Rules
 
