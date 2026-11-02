@@ -37,9 +37,12 @@ API, using AI, with the same idempotency guarantees.
 ```
 relay_engine/
   core/
-    rate_limit.py      token-bucket limiter, one instance per source
-    retry.py            exponential backoff + jitter decorator; respects a
-                         source's own Retry-After header when present
+    rate_limit.py      token-bucket limiter, one instance per source; each
+                         client defines its RateLimit, citing the docs
+    retry.py            send_with_retries(): exponential backoff + full
+                         jitter; respects a source's own Retry-After header
+                         when present. A function, not a decorator, so sleep
+                         and randomness are passed in per call
     idempotency.py       idempotency-key helpers for the create-demo's writes
   clients/
     _base.py            shared HTTP/session plumbing every client inherits
