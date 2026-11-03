@@ -166,15 +166,32 @@ From the actual `surge-quick-quote-leads` WordPress plugin:
   real endpoint, nothing from that response gets committed to this repo —
   same rule as everywhere else here.
 
-## Sources: housecall_pro, search_console (not yet confirmed — fill in here before writing these clients)
+## Source: housecall_pro (confirmed against the live API, 2026-11-03)
 
-- Housecall Pro's real pagination already showed up in an earlier job
-  listing: `{"page": N, "page_size": N, "total_pages": N, "total_items": N,
-  "jobs": [...]}` — unlike website_leads, the total page count **is** in
-  the body, so no manual `ceil()` needed here. Auth mechanism (API key
-  header vs. OAuth bearer token) still needs confirming against HCP's
-  actual API docs or your existing lead-relay integration before writing
-  `clients/housecall_pro.py`.
+Auth and base URL from the lead-relay Worker (`hcp-facebook-lead-relay`),
+which runs against the live API; the rest from a read-only probe that
+printed structure only (keys, paging numbers, headers), never a record.
+
+- `https://api.housecallpro.com` — **no `/v1` prefix**. Auth:
+  `Authorization: Bearer <token>` (`HCP_API_TOKEN`). The API needs the
+  Max plan.
+- `GET /jobs`, `/invoices`, `/estimates`, with `page` and `page_size`.
+  Body: `{"<jobs|invoices|estimates>": [...], "page": N, "page_size": N,
+  "total_pages": N, "total_items": N}` — the list keys bi-engine's staging
+  views read. Unlike website_leads, `total_pages` **is** in the body.
+- `page_size=100` (the Worker's proven size); 500 is refused (400/422).
+- **Rate limit:** no published number, but every response carries
+  `ratelimit-limit: 300`, `ratelimit-remaining`, `ratelimit-reset`: a fixed
+  60-second window, counted per endpoint. The limiter uses 240/min, leaving
+  room for the Worker, which shares the token.
+- Jobs and estimates come newest first; invoices in no stable order. No
+  incremental filter is used, so every pull is a full one (~25 + 23 + 13
+  pages at today's volume) and catches anything a page shift missed.
+  Cost to watch: any change re-uploads every page of that feed, so
+  bi-engine's raw layer grows by a full copy per changed pull.
+
+## Source: search_console (not yet confirmed — fill in here before writing this client)
+
 - Search Console: standard Google API, almost certainly OAuth2 /
   service-account credentials via `searchanalytics.query`, not an API key.
   Confirm the exact auth flow and the two feeds' dimension configs

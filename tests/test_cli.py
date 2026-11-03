@@ -14,6 +14,8 @@ SETTINGS = {
     "WEBSITE_LEADS_KEY": "test-leads-key",
     "BI_ENGINE_URL": "https://bi-engine.example",
     "RELAY_INGEST_KEY": "test-relay-key",
+    "HCP_BASE_URL": "https://api.housecall.example",
+    "HCP_API_TOKEN": "test-hcp-token",
 }
 
 
@@ -54,6 +56,9 @@ class FakeSites:
         if request.url.host == "www.site.example":
             body = {"total": 1, "page": 1, "per_page": 100, "leads": [{"id": 1, "email": "lead1@example.com"}]}
             return httpx.Response(self._leads_status, content=json.dumps(body).encode())
+        if request.url.host == "api.housecall.example":
+            body = {"jobs": [{"id": "job_1"}], "page": 1, "page_size": 100, "total_pages": 1, "total_items": 1}
+            return httpx.Response(200, content=json.dumps(body).encode())
         if request.url.path == "/ingest/rebuild":
             return httpx.Response(200, json={"clean_table_rows": {}})
         return httpx.Response(200, json={"feed": "website_leads", "file_name": "page_001.json", "was_new": True})
@@ -80,6 +85,7 @@ def sites(monkeypatch, clock):
 
     monkeypatch.setattr(cli, "website_leads_http_client", with_fake_transport(cli.website_leads_http_client))
     monkeypatch.setattr(cli, "bi_engine_http_client", with_fake_transport(cli.bi_engine_http_client))
+    monkeypatch.setattr(cli, "housecall_pro_http_client", with_fake_transport(cli.housecall_pro_http_client))
     monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=clock, sleep=clock.sleep))
     return sites
 
@@ -133,6 +139,23 @@ def test_a_source_that_refuses_the_key_fails_the_pull_and_uploads_nothing(sites,
     assert sites.requests_to("bi-engine.example") == []
 
 
+def test_pull_housecall_pro_jobs_delivers_to_its_own_feed(sites, capsys):
+    exit_code = main(["pull", "housecall_pro_jobs"])
+
+    assert exit_code == 0
+    assert [request.url.path for request in sites.requests_to("bi-engine.example")] == [
+        "/ingest/housecall_pro_jobs",
+        "/ingest/rebuild",
+    ]
+    assert sites.requests_to("api.housecall.example")[0].headers["Authorization"] == "Bearer test-hcp-token"
+
+
+def test_a_housecall_pro_pull_needs_only_its_own_settings(sites, monkeypatch):
+    monkeypatch.delenv("WEBSITE_LEADS_KEY")
+
+    assert main(["pull", "housecall_pro_jobs"]) == 0
+
+
 def test_feeds_without_a_client_yet_say_so(capsys):
-    assert main(["pull", "housecall_pro_jobs"]) == 1
-    assert "pull housecall_pro_jobs isn't built yet" in capsys.readouterr().err
+    assert main(["pull", "search_console_totals"]) == 1
+    assert "pull search_console_totals isn't built yet" in capsys.readouterr().err
