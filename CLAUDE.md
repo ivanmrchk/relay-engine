@@ -146,8 +146,18 @@ From the actual `surge-quick-quote-leads` WordPress plugin:
   depend on the `X-WP-TotalPages` response header, even though the plugin
   sets it; a proxy/WAF in front of the site could strip it, and the
   resilience story here is specifically about not trusting that.
-- Use `date_from` for incremental pulls — pass the timestamp of the last
-  successful run instead of refetching full history every time.
+- Use `date_from` for incremental pulls instead of refetching full history
+  every time. The plugin filters `created_at >= date_from`, and `created_at`
+  is the site's local time (`current_time('mysql')`), so pass a **day**
+  (`2026-09-01`), not a UTC timestamp. Overlap is harmless: `bi-engine`
+  keeps one row per lead `id`.
+- Leads come newest first (`ORDER BY id DESC`, LIMIT/OFFSET). A lead that
+  arrives mid-pull pushes one already-fetched lead onto the next page: a
+  repeat, never a gap. Recompute the page count on every page.
+- **Rate limit:** neither the plugin nor the WordPress REST API sets one
+  (checked in `includes/Rest/LeadsController.php`). The one encoded here,
+  1 request/s, is our own ceiling for a shared host — the one limiter not
+  cited from docs, and its comment says so.
 - **This is real production data** (real customer names, phones, emails)
   from an actual business, not `bi-engine`'s fictional Brightwire Electric
   data. Test against recorded fixtures or a mock server; if you do hit the
