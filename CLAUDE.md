@@ -79,6 +79,8 @@ python -m relay_engine pull housecall_pro_jobs
 python -m relay_engine pull housecall_pro_invoices
 python -m relay_engine pull housecall_pro_estimates
 python -m relay_engine pull website_leads --since 2026-09-01   # date_from
+# relay-engine keeps no state between runs: n8n passes --since (the day
+# before its last successful run); without it, a pull fetches everything.
 python -m relay_engine pull search_console_totals
 python -m relay_engine pull search_console_query_pages
 
