@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Resilient, rate-limited relay from source APIs to bi-engine's ingestion API"
 requires-python = ">=3.12"  # bi-engine deploys on 3.12
 dependencies = [
+    "google-auth==2.40.3",  # only to sign the service account's JWT; its own HTTP transport goes unused
     "httpx==0.28.1",
     "python-dotenv==1.2.3",
 ]

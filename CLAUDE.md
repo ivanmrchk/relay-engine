@@ -81,8 +81,10 @@ python -m relay_engine pull housecall_pro_estimates
 python -m relay_engine pull website_leads --since 2026-09-01   # date_from
 # relay-engine keeps no state between runs: n8n passes --since (the day
 # before its last successful run); without it, a pull fetches everything.
-python -m relay_engine pull search_console_totals
-python -m relay_engine pull search_console_query_pages
+python -m relay_engine pull search_console_totals --since 2026-09-01
+python -m relay_engine pull search_console_query_pages --since 2026-09-01
+# Search Console always reaches back 4 days, over days not yet final;
+# without --since it fetches the ~16 months Google keeps (~480 requests).
 
 python -m relay_engine create-demo      # AI drafts + creates a record (write side)
 
@@ -190,14 +192,37 @@ printed structure only (keys, paging numbers, headers), never a record.
   Cost to watch: any change re-uploads every page of that feed, so
   bi-engine's raw layer grows by a full copy per changed pull.
 
-## Source: search_console (not yet confirmed — fill in here before writing this client)
+## Source: search_console (from Google's docs; not yet probed live)
 
-- Search Console: standard Google API, almost certainly OAuth2 /
-  service-account credentials via `searchanalytics.query`, not an API key.
-  Confirm the exact auth flow and the two feeds' dimension configs
-  (`by_date` vs. `by_query_page`) before writing `clients/search_console.py`.
-  Whatever the dimensions, query one day at a time: the file name carries
-  the day (see the contract above).
+- `POST https://www.googleapis.com/webmasters/v3/sites/{siteUrl}/searchAnalytics/query`,
+  `siteUrl` percent-escaped (`sc-domain%3Ayoursite.com` for the domain
+  property, `SEARCH_CONSOLE_SITE_URL`).
+- **Auth: a service account** (`SEARCH_CONSOLE_SERVICE_ACCOUNT_JSON`, the
+  key file's contents), added as a Restricted user on the property. A JWT
+  signed with its key is exchanged at its `token_uri` for an access token,
+  scope `webmasters.readonly`, through `ResilientSession` like every other
+  call; `google-auth` only signs.
+- One request per day per feed (`startDate` = `endDate`), the shape
+  `bi-engine`'s generator mirrors: `search_console_totals` groups by
+  `["date"]`, `search_console_query_pages` by `["query", "page"]`.
+  `rowLimit` 25,000, the maximum; a day that reaches it stops the pull,
+  since `bi-engine` keeps one file per day and rows would be missing.
+- No `dataState`: the default is final data only, which a day gets 2–3
+  days later. Every pull reaches back 4 days, so a day still empty on one
+  run is fetched again on the next. Google keeps 16 months; a pull without
+  `--since` starts 480 days back.
+- **Rate limit** (https://developers.google.com/webmaster-tools/limits):
+  1,200 queries/min per site and per user. The limiter uses 600/min,
+  leaving room for the unpublished "load" quota (10-minute chunks), which
+  query-and-page grouping spends fastest.
+- **To confirm with a structure-only probe** once the key is in `.env`:
+  that `clicks`/`impressions` arrive as whole numbers (the docs type them
+  as doubles; `bi-engine`'s clean layer casts them to `INTEGER`), and what
+  an empty day's body looks like.
+- **A `bi-engine` gap to know about:** its dedup is by content hash per
+  feed, so two days with byte-identical query/page responses keep only the
+  first file, and the second day goes missing. Unlikely at this site's
+  volume (~150 rows/day), but possible on very quiet days.
 
 ## Rules
 

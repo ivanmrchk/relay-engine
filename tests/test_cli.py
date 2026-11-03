@@ -1,6 +1,6 @@
 import json
 import types
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import pytest
@@ -16,6 +16,7 @@ SETTINGS = {
     "RELAY_INGEST_KEY": "test-relay-key",
     "HCP_BASE_URL": "https://api.housecall.example",
     "HCP_API_TOKEN": "test-hcp-token",
+    "SEARCH_CONSOLE_SITE_URL": "sc-domain:example.com",
 }
 
 
@@ -44,8 +45,13 @@ def test_since_is_refused_for_feeds_it_doesnt_apply_to():
         _parse_arguments(["pull", "housecall_pro_jobs", "--since", "2026-09-01"])
 
 
+@pytest.mark.parametrize("feed", ["website_leads", "search_console_totals", "search_console_query_pages"])
+def test_since_applies_to_leads_and_search_console(feed):
+    assert _parse_arguments(["pull", feed, "--since", "2026-09-01"]).since == date(2026, 9, 1)
+
+
 class FakeSites:
-    """One httpx transport standing in for both the WordPress site and bi-engine."""
+    """One httpx transport standing in for every source and bi-engine."""
 
     def __init__(self, *, leads_status: int = 200) -> None:
         self._leads_status = leads_status
@@ -59,6 +65,11 @@ class FakeSites:
         if request.url.host == "api.housecall.example":
             body = {"jobs": [{"id": "job_1"}], "page": 1, "page_size": 100, "total_pages": 1, "total_items": 1}
             return httpx.Response(200, content=json.dumps(body).encode())
+        if request.url.host == "oauth2.example":
+            return httpx.Response(200, json={"access_token": "test-access-token", "expires_in": 3600})
+        if request.url.host == "www.googleapis.com":
+            body = {"rows": [{"keys": ["2026-11-01"], "clicks": 3}], "responseAggregationType": "byProperty"}
+            return httpx.Response(200, content=json.dumps(body).encode())
         if request.url.path == "/ingest/rebuild":
             return httpx.Response(200, json={"clean_table_rows": {}})
         return httpx.Response(200, json={"feed": "website_leads", "file_name": "page_001.json", "was_new": True})
@@ -68,11 +79,12 @@ class FakeSites:
 
 
 @pytest.fixture
-def sites(monkeypatch, clock):
+def sites(monkeypatch, clock, service_account_info):
     """Point the CLI's HTTP clients at FakeSites, and its clock at the fake one, so nothing real is called."""
     sites = FakeSites()
     for name, value in SETTINGS.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv("SEARCH_CONSOLE_SERVICE_ACCOUNT_JSON", json.dumps(service_account_info))
 
     def with_fake_transport(make_client):
         def make_fake_client(**settings):
@@ -86,7 +98,9 @@ def sites(monkeypatch, clock):
     monkeypatch.setattr(cli, "website_leads_http_client", with_fake_transport(cli.website_leads_http_client))
     monkeypatch.setattr(cli, "bi_engine_http_client", with_fake_transport(cli.bi_engine_http_client))
     monkeypatch.setattr(cli, "housecall_pro_http_client", with_fake_transport(cli.housecall_pro_http_client))
-    monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=clock, sleep=clock.sleep))
+    monkeypatch.setattr(cli, "search_console_http_client", with_fake_transport(cli.search_console_http_client))
+    fake_time = types.SimpleNamespace(monotonic=clock, sleep=clock.sleep, time=lambda: 1_790_000_000)
+    monkeypatch.setattr(cli, "time", fake_time)
     return sites
 
 
@@ -156,6 +170,31 @@ def test_a_housecall_pro_pull_needs_only_its_own_settings(sites, monkeypatch):
     assert main(["pull", "housecall_pro_jobs"]) == 0
 
 
-def test_feeds_without_a_client_yet_say_so(capsys):
-    assert main(["pull", "search_console_totals"]) == 1
-    assert "pull search_console_totals isn't built yet" in capsys.readouterr().err
+def test_pull_search_console_uploads_one_file_per_day_then_rebuilds(sites):
+    yesterday = date.today() - timedelta(days=1)
+
+    exit_code = main(["pull", "search_console_totals", "--since", yesterday.isoformat()])
+
+    assert exit_code == 0
+    uploads = [request for request in sites.requests_to("bi-engine.example") if "rebuild" not in request.url.path]
+    assert len(uploads) == 4  # since reaches back over the days not yet final
+    assert all(upload.url.path == "/ingest/search_console_totals" for upload in uploads)
+    assert f'filename="{yesterday.isoformat()}.json"'.encode() in uploads[-1].content
+    assert sites.requests[-1].url.path == "/ingest/rebuild"
+
+
+def test_a_service_account_key_that_isnt_json_is_named_without_its_contents(sites, monkeypatch, capsys):
+    monkeypatch.setenv("SEARCH_CONSOLE_SERVICE_ACCOUNT_JSON", "not-json-secret-material")
+
+    exit_code = main(["pull", "search_console_totals"])
+
+    assert exit_code == 1
+    error = capsys.readouterr().err
+    assert "SEARCH_CONSOLE_SERVICE_ACCOUNT_JSON isn't valid JSON" in error
+    assert "secret-material" not in error
+    assert sites.requests == []
+
+
+def test_create_demo_isnt_built_yet(capsys):
+    assert main(["create-demo"]) == 1
+    assert "create-demo isn't built yet" in capsys.readouterr().err
